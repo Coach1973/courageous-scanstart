@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>商務漫威宇宙 星探系統</title>
+    
+    <!-- 1. 核心引擎 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- 2. 設定 Cyberpunk 風格 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        cyber: {
+                            black: '#09090b',
+                            dark: '#18181b',
+                            card: '#27272a',
+                            neon: '#22d3ee', // Cyan
+                            purple: '#a855f7',
+                            yellow: '#fbbf24',
+                            red: '#ef4444'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Noto Sans TC', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    animation: {
+                        'pulse-glow': 'pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'spin-slow': 'spin 3s linear infinite',
+                    },
+                    keyframes: {
+                        'pulse-glow': {
+                            '0%, 100%': { opacity: 1, boxShadow: '0 0 20px #22d3ee' },
+                            '50%': { opacity: .8, boxShadow: '0 0 5px #22d3ee' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        body { background-color: #09090b; color: #e4e4e7; font-family: 'Noto Sans TC', sans-serif; }
+        /* 隱藏 Canvas，只用於後台製圖 */
+        #generator-canvas { display: none; }
+        .glass-panel { background: rgba(24, 24, 27, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(34, 211, 238, 0.2); }
+        .neon-border { box-shadow: 0 0 10px rgba(34, 211, 238, 0.3); border-color: #22d3ee; }
+        .cyber-input { background: #09090b; border: 1px solid #3f3f46; color: white; transition: all 0.3s; }
+        .cyber-input:focus { border-color: #22d3ee; box-shadow: 0 0 10px rgba(34, 211, 238, 0.2); outline: none; }
+        .gender-btn { border: 1px solid #3f3f46; color: #71717a; transition: all 0.3s; }
+        .gender-btn.active { border-color: #22d3ee; background-color: rgba(34, 211, 238, 0.1); color: #22d3ee; box-shadow: 0 0 10px rgba(34, 211, 238, 0.2); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- 隱藏的畫布，用於生成圖片 -->
+    <canvas id="generator-canvas" width="800" height="1200"></canvas>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // 圖示組件
+        const Icon = ({ name, size = 20, className }) => {
+            React.useEffect(() => { lucide.createIcons(); }, [name]);
+            return <i data-lucide={name} width={size} height={size} className={className}></i>;
+        };
+
+        // --- V2.1 升級版智慧配對資料庫 ---
+        // 結構：keywords (觸發關鍵字) -> pool (隨機候選池)
+        const INDUSTRY_DATABASE = [
+            {
+                id: "design",
+                keywords: ["設計", "裝修", "室內", "建築", "軟裝", "景觀"],
+                pool: ["工班團隊", "房地產仲介", "商業攝影", "家具家飾", "燈光設計", "智能家居", "清潔公司", "驗屋師", "園藝廠商", "綠建材"]
+            },
+            {
+                id: "marketing",
+                keywords: ["行銷", "廣告", "媒體", "公關", "小編", "品牌"],
+                pool: ["網頁工程", "影片製作", "商業顧問", "平面攝影", "印刷輸出", "活動企劃", "KOL媒合", "SEO專家", "市場調查", "展場設計"]
+            },
+            {
+                id: "realestate",
+                keywords: ["房產", "仲介", "地政", "租賃", "包租", "建設"],
+                pool: ["代書", "銀行貸款", "搬家公司", "室內設計", "驗屋師", "產險", "清潔公司", "會計師", "律師", "物業管理"]
+            },
+            {
+                id: "finance",
+                keywords: ["保險", "理財", "金融", "證券", "銀行"],
+                pool: ["會計師", "律師", "車商業務", "房產仲介", "企業顧問", "稅務規劃", "禮品採購", "高端旅遊", "健康管理"]
+            },
+            {
+                id: "legal",
+                keywords: ["法律", "律師", "代書", "專利", "商標"],
+                pool: ["會計師", "專利商標", "徵信社", "心理諮商", "土地開發", "企業顧問", "外語翻譯", "移民顧問"]
+            },
+            {
+                id: "health",
+                keywords: ["健康", "醫療", "養生", "美業", "健身", "瑜珈"],
+                pool: ["營養師", "保險顧問", "形象顧問", "健康餐飲", "月子中心", "物理治療", "心理諮商", "健檢中心", "輔具廠商"]
+            },
+            {
+                id: "engineering",
+                keywords: ["工程", "水電", "弱電", "空調", "機電"],
+                pool: ["室內設計", "建築師", "物業管理", "系統櫃", "防水抓漏", "太陽能", "建材商", "消防設備"]
+            },
+            {
+                id: "event",
+                keywords: ["活動", "策展", "主持", "婚禮"],
+                pool: ["場地租借", "外燴餐飲", "燈光音響", "平面攝影", "動態錄影", "禮品贈品", "花藝設計", "新娘秘書", "樂團"]
+            }
+        ];
+
+        // 通用池 (當找不到關鍵字時使用)
+        const GENERAL_POOL = ["商業教練", "數位行銷", "法律顧問", "會計師", "企業培訓", "商務空間", "人資顧問", "禮贈品", "IT資訊", "活動企劃"];
+
+        // V2.7: 海量神秘背影 ID 矩陣 (Unsplash Photo IDs)
+        // 這些都是精心挑選的商務、城市、剪影風格
+        const PHOTO_MATRIX = {
+            male: [
+                "1519085360753-af0119f7cbe7", "1503443207922-dff7d543fd0e", "1492571350019-229193422403", 
+                "1556155092-490b1baeb499", "1485217988980-11786ced9454", "1507679799987-173874b2096c", 
+                "1535713875002-d1d0cf377fde", "1500048993953-d23a436266cf", "1551836022-d5d88e9218df", 
+                "1517048696772-e2849e599c4f", "1600880292205-23d860f339f4", "1506629082955-511b1aa00215",
+                "1557804506-669a67965ba0", "1560250097-0b93528c311a", "1542744173-8e7e53415bb0",
+                "1491336477066-31156b5d4f35", "1548372290-8d01b6c8e78c", "1505664194797-245cc8198500",
+                "1512436991641-6745f9ae8a53", "1520333789090-1afc82db536a", "1494790108377-be9c29b29330",
+                "1539571696357-5a69c17a67c6", "1519389950473-47ba0277781c", "1534528741775-53994a69daeb",
+                "1524253482453-3fed8c2fe635", "1504384308090-c54beed199f8", "1480429370139-89ac4cf6d278",
+                "1532938911083-7b41f18af5fc", "1508672019048-805c8dc2d141", "1578574577315-3fzb55c0a373"
+            ],
+            female: [
+                "1487412720507-e7ab37603c6f", "1552664730-d307ca884978", "1573164713988-8665fc0566f2", 
+                "1541823709867-1b206113eafd", "1508214751196-bcfd4ca60f91", "1573496359142-b8d87734a5a2", 
+                "1560250097-0b93528c311a", "1580489944761-15a19d654956", "1598550832205-d5d5182e0779", 
+                "1529626455594-4ff0802cfb7e", "1573497019940-1c28c88b4f3e", "1544717305-2782549b5136",
+                "1581091226825-a6a2a5aee158", "1581092795360-fd1ca04f0952", "1542206391-78c48b43f283",
+                "1542596594-649edbc13630", "1543269865-cbf427effbad", "1522202176988-66273c2fd55f",
+                "1554118811-1e0d58224f24", "1560250097-0b93528c311a", "1573496359142-b8d87734a5a2",
+                "1573497019940-1c28c88b4f3e", "1581382575239-9225b132980a", "1581092160562-404239050bea",
+                "1522071820081-009f0129c71c", "1542206391-78c48b43f283", "1594744803329-e58b31de8bf5",
+                "1550751827-4bd374c3f58b", "1580894732444-8ecded7900cd", "1517841905240-472988babdf9"
+            ]
+        };
+
+        const SAFE_FALLBACK = {
+            male: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?q=80&w=600&auto=format&fit=crop",
+            female: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?q=80&w=600&auto=format&fit=crop"
+        };
+
+        const pickRandom = (arr, count) => {
+            const shuffled = [...arr].sort(() => 0.5 - Math.random());
+            return shuffled.slice(0, count);
+        };
+
+        const getPartners = (inputIndustry) => {
+            for (const category of INDUSTRY_DATABASE) {
+                if (category.keywords.some(keyword => inputIndustry.includes(keyword))) {
+                    return pickRandom(category.pool, 3);
+                }
+            }
+            return pickRandom(GENERAL_POOL, 3);
+        };
+
+        // --- 主程式 ---
+        const App = () => {
+            const [step, setStep] = useState(1); // 1: Input, 2: Preview
+            const [loading, setLoading] = useState(false);
+            const [generatedImgUrl, setGeneratedImgUrl] = useState(null);
+            
+            const [formData, setFormData] = useState({
+                name: '',
+                gender: 'male', // default
+                phone: '', 
+                industry: '',
+                needs: ['', '', ''],
+                referrer: '',
+                partners: []
+            });
+
+            // 自動配對 (Debounce 簡單處理，或直接依賴輸入)
+            useEffect(() => {
+                if (formData.industry.length > 1) {
+                    const partners = getPartners(formData.industry);
+                    setFormData(prev => ({ ...prev, partners }));
+                }
+            }, [formData.industry]);
+
+            // 手動重新配對按鈕的功能
+            const handleRefreshPartners = () => {
+                if (formData.industry.length > 0) {
+                    const partners = getPartners(formData.industry);
+                    setFormData(prev => ({ ...prev, partners }));
+                }
+            };
+
+            const handleInputChange = (e) => {
+                const { name, value } = e.target;
+                setFormData(prev => ({ ...prev, [name]: value }));
+            };
+
+            const handleGenderChange = (gender) => {
+                setFormData(prev => ({ ...prev, gender }));
+            };
+
+            const handleNeedChange = (index, value) => {
+                const newNeeds = [...formData.needs];
+                newNeeds[index] = value;
+                setFormData(prev => ({ ...prev, needs: newNeeds }));
+            };
+
+            // --- 核心：Canvas 製圖引擎 ---
+            const generateImage = async () => {
+                setLoading(true);
+                const canvas = document.getElementById('generator-canvas');
+                const ctx = canvas.getContext('2d');
+
+                const successRate = Math.floor(Math.random() * (88 - 65 + 1)) + 65;
+
+                const photoList = PHOTO_MATRIX[formData.gender];
+                const randomPhotoId = photoList[Math.floor(Math.random() * photoList.length)];
+                const photoUrl = `https://images.unsplash.com/photo-${randomPhotoId}?q=80&w=600&auto=format&fit=crop`;
+
+                // 1. 繪製背景 (深色科技風)
+                ctx.fillStyle = '#09090b';
+                ctx.fillRect(0, 0, 800, 1200);
+                
+                // 網格線
+                ctx.strokeStyle = '#1f2937';
+                ctx.lineWidth = 2;
+                for(let i=0; i<800; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,1200); ctx.stroke(); }
+                for(let i=0; i<1200; i+=40) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(800,i); ctx.stroke(); }
+
+                // 霓虹邊框
+                ctx.strokeStyle = '#22d3ee';
+                ctx.lineWidth = 10;
+                ctx.strokeRect(20, 20, 760, 1160);
+                
+                // 角落裝飾
+                ctx.fillStyle = '#22d3ee';
+                ctx.fillRect(20, 20, 100, 20);
+                ctx.fillRect(20, 20, 20, 100);
+                ctx.fillRect(680, 20, 100, 20);
+                ctx.fillRect(760, 20, 20, 100);
+                ctx.fillRect(20, 1160, 100, 20);
+                ctx.fillRect(20, 1080, 20, 100);
+                ctx.fillRect(680, 1160, 100, 20);
+                ctx.fillRect(760, 1080, 20, 100);
+
+                // 2. 繪製標題區 (擴大區域以容納電話)
+                const headerH = 190;
+                ctx.fillStyle = '#18181b';
+                ctx.fillRect(40, 60, 720, headerH);
+                ctx.strokeStyle = '#22d3ee';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(40, 60, 720, headerH);
+
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 70px "Noto Sans TC", sans-serif';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'alphabetic';
+                ctx.fillText(formData.name || '來賓姓名', 70, 130);
+                
+                ctx.fillStyle = '#22d3ee';
+                ctx.font = '40px "Noto Sans TC", sans-serif';
+                ctx.fillText(formData.industry || '專業類別', 70, 180);
+
+                // V2.9: 新增電話顯示
+                ctx.fillStyle = '#a1a1aa';
+                ctx.font = 'bold 30px "JetBrains Mono", monospace'; // 使用等寬字體顯示數字更清楚
+                ctx.fillText(formData.phone || '09xx-xxx-xxx', 70, 225);
+
+                ctx.fillStyle = '#3f3f46';
+                ctx.font = 'bold 120px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText('N', 730, 200); // 稍微下移
+                ctx.textAlign = 'left';
+
+                // 3. 繪製圖像區 (神秘背影)
+                const imageY = 270; // 往下移一點避開 Header
+                const imageH = 360; // 稍微縮減高度
+                ctx.fillStyle = '#27272a';
+                ctx.fillRect(40, imageY, 720, imageH);
+
+                const img = new Image();
+                img.crossOrigin = "Anonymous";
+                img.src = photoUrl;
+
+                await new Promise((resolve) => {
+                    img.onload = () => {
+                        const scale = Math.max(720 / img.width, imageH / img.height);
+                        const x = (720 / scale - img.width) / 2;
+                        const y = (imageH / scale - img.height) / 2;
+                        
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.rect(40, imageY, 720, imageH);
+                        ctx.clip();
+                        ctx.drawImage(img, x * scale + 40, y * scale + imageY, img.width * scale, img.height * scale);
+                        
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; 
+                        ctx.fillRect(40, imageY, 720, imageH);
+                        ctx.fillStyle = 'rgba(34, 211, 238, 0.05)';
+                        for(let py=imageY; py<imageY+imageH; py+=10) {
+                            ctx.fillRect(40, py, 720, 2);
+                        }
+                        ctx.restore();
+                        resolve();
+                    };
+                    img.onerror = () => {
+                        const fallbackImg = new Image();
+                        fallbackImg.crossOrigin = "Anonymous";
+                        fallbackImg.src = SAFE_FALLBACK[formData.gender];
+                        fallbackImg.onload = () => {
+                             const scale = Math.max(720 / fallbackImg.width, imageH / fallbackImg.height);
+                             const x = (720 / scale - fallbackImg.width) / 2;
+                             const y = (imageH / scale - fallbackImg.height) / 2;
+                             ctx.save();
+                             ctx.beginPath();
+                             ctx.rect(40, imageY, 720, imageH);
+                             ctx.clip();
+                             ctx.drawImage(fallbackImg, x * scale + 40, y * scale + imageY, fallbackImg.width * scale, fallbackImg.height * scale);
+                             ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; 
+                             ctx.fillRect(40, imageY, 720, imageH);
+                             ctx.restore();
+                             resolve();
+                        };
+                        fallbackImg.onerror = () => resolve();
+                    }
+                });
+                
+                // 鎖頭位置調整
+                const lockCenterY = imageY + (imageH / 2) - 10;
+
+                ctx.shadowBlur = 30;
+                ctx.shadowColor = '#fbbf24';
+                ctx.strokeStyle = '#fbbf24';
+                ctx.lineWidth = 8;
+                ctx.beginPath(); ctx.arc(400, lockCenterY, 60, 0, Math.PI * 2); ctx.stroke();
+                
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#fbbf24';
+                ctx.fillRect(360, lockCenterY, 80, 60);
+                ctx.strokeStyle = '#fbbf24';
+                ctx.lineWidth = 10;
+                ctx.beginPath(); ctx.arc(400, lockCenterY, 30, Math.PI, 0); ctx.stroke();
+
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = '#000000';
+                ctx.fillStyle = '#fbbf24';
+                ctx.font = 'bold 50px "Noto Sans TC", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`預估成功率: ${successRate}%`, 400, lockCenterY + 160);
+                
+                ctx.fillStyle = '#e4e4e7';
+                ctx.font = '24px "Noto Sans TC", sans-serif';
+                ctx.fillText('POTENTIAL VALUE UNLOCKED', 400, lockCenterY + 200);
+                ctx.textAlign = 'left';
+                ctx.shadowBlur = 0; 
+
+                // 4. 繪製需求 (改為 "WANTED // 理想合作對象")
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 36px "Noto Sans TC", sans-serif';
+                ctx.fillText('WANTED // 理想合作對象', 60, 680);
+                
+                formData.needs.forEach((need, idx) => {
+                    if(!need) return;
+                    ctx.fillStyle = '#18181b';
+                    ctx.fillRect(60, 700 + (idx * 70), 680, 55);
+                    ctx.strokeStyle = '#3f3f46';
+                    ctx.strokeRect(60, 700 + (idx * 70), 680, 55);
+                    ctx.fillStyle = '#e4e4e7';
+                    ctx.font = '30px "Noto Sans TC", sans-serif';
+                    ctx.fillText(`• ${need}`, 80, 738 + (idx * 70));
+                });
+
+                // 5. 繪製推薦合作
+                ctx.fillStyle = '#fbbf24';
+                ctx.font = 'bold 36px "Noto Sans TC", sans-serif';
+                ctx.fillText('PARTNERS // 推薦合作', 60, 950);
+                
+                const boxWidth = 210;
+                formData.partners.forEach((partner, idx) => {
+                    const x = 60 + (idx * 235);
+                    ctx.fillStyle = '#18181b';
+                    ctx.fillRect(x, 970, boxWidth, 60);
+                    ctx.strokeStyle = '#fbbf24';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x, 970, boxWidth, 60);
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.font = '24px "Noto Sans TC", sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(partner, x + boxWidth/2, 1010);
+                });
+                ctx.textAlign = 'left';
+
+                // 6. 底部資訊
+                ctx.fillStyle = '#22d3ee';
+                ctx.font = '24px sans-serif';
+                ctx.fillText(`SCOUTED BY: ${formData.referrer || 'BNI Agent'}`, 60, 1120);
+                ctx.fillStyle = '#52525b';
+                ctx.font = '20px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(`ID: ${Math.floor(Math.random()*1000000).toString().padStart(6, '0')}`, 740, 1120);
+                ctx.fillText(`SYSTEM V3.1`, 740, 1150);
+                ctx.textAlign = 'left';
+
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                setGeneratedImgUrl(dataUrl);
+                setLoading(false);
+                setStep(2);
+                console.log("Saving data to database...", formData); 
+            };
+
+            // --- V2.9 分享邏輯更新 (加入電話) ---
+            const handleShare = async () => {
+                if (!generatedImgUrl) return;
+
+                const res = await fetch(generatedImgUrl);
+                const blob = await res.blob();
+                
+                if (navigator.share && navigator.canShare) {
+                    const file = new File([blob], "bni_scout_card.jpg", { type: "image/jpeg" });
+                    if (navigator.canShare({ files: [file] })) {
+                        try {
+                            await navigator.share({
+                                title: `BNI 星探推薦：${formData.name}`,
+                                text: `發現一位優質夥伴！\n姓名：${formData.name}\n專業類別：${formData.industry}\n電話：${formData.phone || '未提供'}\n請協助連結！`,
+                                files: [file]
+                            });
+                            return; 
+                        } catch (err) {
+                            console.log("Web Share API failed or cancelled.", err);
+                        }
+                    }
+                }
+
+                try {
+                    if (!navigator.clipboard || !window.ClipboardItem) {
+                        alert("⚠️ 您的瀏覽器不支援自動複製，請直接使用「下載圖片」功能！");
+                        return;
+                    }
+                    const canvas = document.getElementById('generator-canvas');
+                    canvas.toBlob(async (pngBlob) => {
+                        if (!pngBlob) {
+                            alert("⚠️ 圖片生成發生錯誤，請稍後再試。");
+                            return;
+                        }
+                        try {
+                            const item = new ClipboardItem({ "image/png": pngBlob });
+                            await navigator.clipboard.write([item]);
+                            alert("✅ 圖片已複製！\n\n(電腦版模式)\n請打開 LINE 直接貼上 (Ctrl+V) 或是右鍵選擇貼上！");
+                        } catch (err) {
+                            console.error("Clipboard write failed", err);
+                            alert("⚠️ 自動複製失敗 (可能因權限或非 HTTPS 環境)。\n請點擊右側「下載圖片」，然後手動傳送給朋友！");
+                        }
+                    }, 'image/png');
+                } catch (err) {
+                    alert("⚠️ 分享功能受限，請使用「下載圖片」功能。");
+                }
+            };
+
+            const handleReset = () => {
+                setStep(1);
+                setGeneratedImgUrl(null);
+                setFormData({ ...formData, name: '', industry: '', phone: '', needs: ['', '', ''] });
+            };
+
+            return (
+                <div className="min-h-screen bg-cyber-black text-white p-4 relative overflow-hidden bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]">
+                    <div className="absolute -top-20 -left-20 w-64 h-64 bg-cyber-neon/20 rounded-full blur-[80px]"></div>
+                    <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-cyber-purple/20 rounded-full blur-[80px]"></div>
+
+                    <div className="max-w-md mx-auto relative z-10">
+                        <header className="flex items-center justify-between mb-8 pt-4">
+                            <div>
+                                <h1 className="text-2xl font-black italic tracking-widest text-white">
+                                    商務漫威宇宙 <span className="text-cyber-neon">星探系統</span>
+                                </h1>
+                                <p className="text-xs text-gray-500 font-mono tracking-widest">V3.1 INTELLIGENT MATCH</p>
+                            </div>
+                            <div className="bg-cyber-dark border border-gray-700 p-2 rounded-full shadow-[0_0_15px_rgba(34, 211, 238, 0.2)]">
+                                <Icon name="radar" className="text-cyber-neon animate-spin-slow" />
+                            </div>
+                        </header>
+
+                        {step === 1 && (
+                            <div className="glass-panel p-6 rounded-2xl animate-pulse-glow">
+                                <h2 className="text-lg font-bold mb-4 flex items-center text-cyber-neon">
+                                    <Icon name="user-plus" size={18} className="mr-2"/> 
+                                    來賓資料建立
+                                </h2>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-xs text-gray-400 block mb-1">推薦人 (Agent Name)</label>
+                                        <input type="text" name="referrer" value={formData.referrer} onChange={handleInputChange} className="w-full cyber-input rounded p-3" placeholder="請輸入您的名字" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs text-gray-400 block mb-1">姓名</label>
+                                            <input type="text" name="name" value={formData.name} onChange={handleInputChange} className="w-full cyber-input rounded p-3" placeholder="來賓姓名" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-400 block mb-1">手機 (Phone)</label>
+                                            <input type="tel" name="phone" value={formData.phone} onChange={handleInputChange} className="w-full cyber-input rounded p-3" placeholder="09xx..." />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-gray-400 block mb-1">專業類別</label>
+                                        <input type="text" name="industry" value={formData.industry} onChange={handleInputChange} className="w-full cyber-input rounded p-3" placeholder="Ex: 設計" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-gray-400 block mb-1">性別</label>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <button onClick={() => handleGenderChange('male')} className={`py-2 rounded font-bold text-sm flex items-center justify-center gender-btn ${formData.gender === 'male' ? 'active' : 'bg-cyber-black'}`}>
+                                                <Icon name="user" size={16} className="mr-2"/> 男性 (Male)
+                                            </button>
+                                            <button onClick={() => handleGenderChange('female')} className={`py-2 rounded font-bold text-sm flex items-center justify-center gender-btn ${formData.gender === 'female' ? 'active' : 'bg-cyber-black'}`}>
+                                                <Icon name="user-check" size={16} className="mr-2"/> 女性 (Female)
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {formData.partners.length > 0 && (
+                                        <div className="bg-cyber-yellow/10 border border-cyber-yellow/30 p-3 rounded text-xs text-cyber-yellow relative group">
+                                            <div className="flex justify-between items-center mb-1">
+                                                <span className="font-bold flex items-center"><Icon name="link" size={12} className="mr-1"/> 建議引薦合作產業：</span>
+                                                <button onClick={handleRefreshPartners} className="text-cyber-neon hover:text-white p-1 rounded hover:bg-white/10 transition-colors" title="更換推薦">
+                                                    <Icon name="refresh-cw" size={12} />
+                                                </button>
+                                            </div>
+                                            <div className="flex flex-wrap gap-1">
+                                                {formData.partners.map((p, idx) => (
+                                                    <span key={idx} className="bg-cyber-yellow/20 px-2 py-0.5 rounded">{p}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div>
+                                        <label className="text-xs text-gray-400 block mb-1">你最想要的3種合作對象或是客戶職業</label>
+                                        <div className="space-y-2">
+                                            {[0, 1, 2].map(i => (
+                                                <input key={i} type="text" value={formData.needs[i]} onChange={(e) => handleNeedChange(i, e.target.value)} className="w-full cyber-input rounded p-2 text-sm" placeholder={`合作對象/客戶樣貌 ${i+1}`} />
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <button onClick={generateImage} disabled={loading || !formData.name} className="w-full bg-cyber-neon hover:bg-white text-black font-black py-4 rounded-xl shadow-[0_0_20px_rgba(34,211,238,0.4)] transition-all flex items-center justify-center mt-6 disabled:opacity-50 disabled:cursor-not-allowed">
+                                        {loading ? <span className="flex items-center"><Icon name="loader-2" className="animate-spin mr-2"/> 製圖運算中...</span> : <span className="flex items-center"><Icon name="cpu" className="mr-2"/> 生成 N 卡並儲存</span>}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 2 && generatedImgUrl && (
+                            <div className="animate-fadeIn">
+                                <div className="bg-white/5 p-2 rounded-xl border border-gray-700 mb-6 relative group">
+                                    <img src={generatedImgUrl} alt="Generated N Card" className="w-full rounded-lg shadow-2xl" />
+                                    <div className="absolute top-4 right-4 bg-black/80 text-cyber-neon text-xs px-3 py-1 rounded font-mono border border-cyber-neon backdrop-blur-md">PREVIEW</div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <button onClick={handleShare} className="bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl flex items-center justify-center shadow-lg transition-all border border-transparent hover:border-[#0f0]">
+                                        <Icon name="share-2" className="mr-2" /> Line 分享/複製
+                                    </button>
+                                    <a href={generatedImgUrl} download={`BNI_N_Card_${formData.name}.jpg`} className="bg-cyber-dark border border-gray-600 hover:border-white text-white font-bold py-3 rounded-xl flex items-center justify-center transition-all">
+                                        <Icon name="download" className="mr-2" /> 下載圖片
+                                    </a>
+                                </div>
+                                <button onClick={handleReset} className="w-full mt-6 text-gray-500 hover:text-white text-sm flex items-center justify-center py-2 transition-colors">
+                                    <Icon name="rotate-ccw" size={14} className="mr-1" /> 建立下一筆資料
+                                </button>
+                                <div className="mt-8 text-center opacity-60">
+                                    <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">Database Connection</p>
+                                    <div className="flex items-center justify-center space-x-2 text-xs text-green-500">
+                                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> <span>Sync Active</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
